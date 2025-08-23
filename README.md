@@ -1,1 +1,1 @@
-## PricePoke - Pytorch Linear Regressor Neural Network
+## PricePoke - Pytorch Classifier Neural Network
