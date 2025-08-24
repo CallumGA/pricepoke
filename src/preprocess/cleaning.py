@@ -2,6 +2,7 @@ import re
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+import ast
 
 """
 TODO: Clean the data
@@ -33,10 +34,31 @@ class CleanConfig:
     # Optional timezone string (e.g., "UTC"); if None, leave tz-naive
     timezone: Optional[str] = None
 
-    # Column that holds condition/grade labels and a normalization map
-    condition_column: Optional[str] = None
-    # Map various spellings → canonical form, e.g., {"nm": "Near Mint", "near-mint": "Near Mint"}
-    condition_map: Dict[str, str] = field(default_factory=dict)
+    # === Merge configuration (data <-> prices) ===
+    # Key column names
+    data_card_id_col: str = "cardId"
+    prices_card_id_col: str = "cardId"
+    # Date column in prices and data (for normalization)
+    prices_date_col: str = "date"
+    data_release_date_col: Optional[str] = "releaseDate"
+
+    # Variant handling
+    data_variants_col: Optional[str] = "variants"  # list-like string, e.g., "[\"Holofoil\"]"
+    prices_variant_col: Optional[str] = "variant"   # string per row in prices
+    # Canonical variant mapping (case-insensitive keys)
+    variant_map: Dict[str, str] = field(default_factory=lambda: {
+        "normal": "Normal",
+        "reverse holo": "Reverse Holofoil",
+        "reverse holofoil": "Reverse Holofoil",
+        "holo": "Holofoil",
+        "holofoil": "Holofoil",
+        "foil": "Holofoil",
+        "non-holo": "Normal",
+        "": "Normal",
+        "none": "Normal",
+        "na": "Normal",
+    })
+
 
     # Keep rows with at least this ratio of non-null values; 0.20 ≈ "drop rows 80% empty"
     min_non_null_ratio: float = 0.20
@@ -54,6 +76,11 @@ class CleanConfig:
     special_char_patterns: List[str] = field(
         default_factory=lambda: [r"[\r\n\t]", r"\u200b", r"\ufeff"]
     )
+
+    # Price columns present in prices file to coerce to numeric
+    price_columns: List[str] = field(default_factory=lambda: [
+        "rawPrice", "gradedPriceTen", "gradedPriceNine"
+    ])
 
     # Outlier handling strategy: None | "zscore" | "iqr"
     outlier_strategy: Optional[str] = None
@@ -131,26 +158,143 @@ def ensure_date_consistency(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
     return cleaned
 
 
-def normalize_categorical_values(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
-    """Normalize categorical labels (e.g., card condition values) using a mapping.
 
-    Example:
-        cfg.condition_column = "condition"
-        cfg.condition_map = {
-            "nm": "Near Mint",
-            "near mint": "Near Mint",
-            "near-mint": "Near Mint",
-            "n/m": "Near Mint",
-        }
 
-    NOTE: Pre-normalizes keys to lowercase, stripped form for robust matching.
-    """
+# =============================
+# Cleaning steps (customize)
+# =============================
+
+def drop_useless_columns(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
     cleaned = df.copy()
-    if cfg.condition_column and cfg.condition_column in cleaned.columns and cfg.condition_map:
-        norm_map = {str(k).strip().lower(): v for k, v in cfg.condition_map.items()}
-        col = cleaned[cfg.condition_column].astype("string").str.strip().str.lower()
-        cleaned[cfg.condition_column] = col.map(norm_map).fillna(cleaned[cfg.condition_column])
+    for col in ["description", "variantMap", "price"]:
+        if col in cleaned.columns:
+            cleaned = cleaned.drop(columns=[col])
     return cleaned
+
+
+def _normalize_variant_value(val: Optional[str], cfg: CleanConfig) -> Optional[str]:
+    if val is None:
+        return None
+    key = str(val).strip().lower()
+    return cfg.variant_map.get(key, val if isinstance(val, str) else None)
+
+def _parse_variants_list(val: Optional[str]) -> List[str]:
+    """Parse a list-like string such as '["Normal","Reverse Holofoil"]' into a Python list.
+    Falls back to a single-item list if parsing fails.
+    """
+    if val is None:
+        return []
+    s = str(val).strip()
+    if not s:
+        return []
+    try:
+        parsed = ast.literal_eval(s)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed]
+    except Exception:
+        pass
+    # Fallback: split on commas
+    return [item.strip() for item in s.split(",") if item.strip()]
+
+def normalize_and_explode_variants(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
+    """From a dataset that has a list-like variants column (`cfg.data_variants_col`),
+    produce one row per variant with a new column `variant`.
+    If no variants exist, keep a single row with variant=None.
+    """
+    if not cfg.data_variants_col or cfg.data_variants_col not in df.columns:
+        out = df.copy()
+        out["variant"] = None
+        return out
+
+    tmp = df.copy()
+    parsed = tmp[cfg.data_variants_col].apply(_parse_variants_list)
+    # If a row has no variants, use [None] so explode keeps one row
+    parsed = parsed.apply(lambda lst: lst if lst else [None])
+    tmp = tmp.assign(_variants_parsed=parsed).explode("_variants_parsed", ignore_index=True)
+    tmp = tmp.rename(columns={"_variants_parsed": "variant"})
+    # Normalize variant values to canonical labels
+    tmp["variant"] = tmp["variant"].apply(lambda v: _normalize_variant_value(v, cfg))
+    return tmp
+
+def coerce_price_columns_numeric(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
+    cleaned = df.copy()
+    for col in cfg.price_columns:
+        if col in cleaned.columns:
+            cleaned[col] = pd.to_numeric(cleaned[col], errors="coerce")
+    return cleaned
+
+def merge_data_and_prices(data_df: pd.DataFrame, prices_df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
+    """Merge card metadata (data_df) with prices (prices_df) without creating duplicate
+    cartesian products. Strategy:
+      1) Clean basics (special chars, dates, numeric prices)
+      2) Normalize/align `cardId` columns and `variant` values (explode data variants)
+      3) Drop exact duplicate price observations by [date, cardId, variant]
+      4) Left-join prices onto expanded data on [cardId, variant]; if `variant` is missing
+         in prices, interpret as `Normal` for matching (configurable via cfg.variant_map)
+    """
+    # Shallow copies
+    data = data_df.copy()
+    prices = prices_df.copy()
+
+    # Normalize column names of keys
+    if cfg.data_card_id_col not in data.columns:
+        raise KeyError(f"Missing data key column: {cfg.data_card_id_col}")
+    if cfg.prices_card_id_col not in prices.columns:
+        raise KeyError(f"Missing prices key column: {cfg.prices_card_id_col}")
+
+    # Normalize and coerce dates
+    # For data (releaseDate)
+    if cfg.data_release_date_col and cfg.data_release_date_col in data.columns:
+        data[cfg.data_release_date_col] = pd.to_datetime(data[cfg.data_release_date_col], errors="coerce", utc=True)
+    # For prices (transaction date)
+    if cfg.prices_date_col in prices.columns:
+        prices[cfg.prices_date_col] = pd.to_datetime(prices[cfg.prices_date_col], errors="coerce", utc=True)
+
+    # Price columns to numeric
+    prices = coerce_price_columns_numeric(prices, cfg)
+
+    # Normalize variant columns
+    # Prices: normalize text; empty/NaN => map to canonical 'Normal'
+    if cfg.prices_variant_col and cfg.prices_variant_col in prices.columns:
+        prices[cfg.prices_variant_col] = prices[cfg.prices_variant_col].apply(
+            lambda v: _normalize_variant_value(v if pd.notna(v) else "", cfg)
+        )
+    else:
+        prices[cfg.prices_variant_col or "variant"] = None
+
+    # Data: explode variants -> column `variant`
+    data_expanded = normalize_and_explode_variants(data, cfg)
+
+    # Drop exact duplicate price observations (keep first)
+    dedupe_subset = [cfg.prices_date_col, cfg.prices_card_id_col]
+    if cfg.prices_variant_col:
+        dedupe_subset.append(cfg.prices_variant_col)
+    prices = prices.drop_duplicates(subset=dedupe_subset, keep="first")
+
+    # Prepare join keys
+    left_on = [cfg.data_card_id_col, "variant"]
+    right_on = [cfg.prices_card_id_col, cfg.prices_variant_col or "variant"]
+
+    merged = pd.merge(
+        data_expanded,
+        prices,
+        how="left",
+        left_on=left_on,
+        right_on=right_on,
+        suffixes=("", "_price")
+    )
+
+    return merged
+
+
+def drop_rows_missing_prices(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
+    """Drop rows where all key price-related columns (including date) are missing."""
+    required_cols = ["date", "rawPrice", "gradedPriceTen", "gradedPriceNine"]
+    cleaned = df.copy()
+    present_cols = [c for c in required_cols if c in cleaned.columns]
+    if not present_cols:
+        return cleaned
+    return cleaned.dropna(subset=present_cols, how="all")
 
 
 def detect_and_remove_outliers(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
@@ -223,12 +367,15 @@ def clean_data(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
 
     Order of operations is aligned with the TODO list.
     """
+    # If you need to merge card metadata with price history first, use `merge_data_and_prices` externally
+    # and then pass the merged DataFrame into this function.
     steps = [
         remove_special_characters,
+        drop_useless_columns,
         drop_sparse_rows,
         remove_duplicates,
         ensure_date_consistency,
-        normalize_categorical_values,
+        drop_rows_missing_prices,
         detect_and_remove_outliers,
         ensure_correct_dtypes,
     ]
@@ -242,21 +389,30 @@ def clean_data(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
 # Example usage (adjust or remove)
 # =============================
 if __name__ == "__main__":
-    # Example scaffold (no I/O by default). Replace with your own paths.
-    # df = pd.read_csv("/path/to/raw.csv")
-    # cfg = CleanConfig(
-    #     date_columns=["sale_date"],
-    #     timezone="UTC",
-    #     condition_column="condition",
-    #     condition_map={
-    #         "nm": "Near Mint",
-    #         "near-mint": "Near Mint",
-    #         "near mint": "Near Mint",
-    #     },
-    #     dtype_overrides={"price": "float64"},
-    #     outlier_strategy="iqr",
-    #     outlier_columns=["price"],
-    # )
-    # cleaned = clean_data(df, cfg)
-    # cleaned.to_csv("/path/to/cleaned.csv", index=False)
-    pass
+    import pandas as pd
+    data_df = pd.read_csv("/Users/callumanderson/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/raw/pokemon_data.csv")
+    prices_df = pd.read_csv("/Users/callumanderson/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/raw/pokemon_prices.csv")
+
+    # Basic config: set date columns and types
+    cfg = CleanConfig(
+        date_columns=["releaseDate", "date"],
+        timezone="UTC",
+        dtype_overrides={
+            # Example: coerce price columns if present in merged frame
+            # "rawPrice": "float64",
+            # "gradedPriceTen": "float64",
+            # "gradedPriceNine": "float64",
+        },
+        outlier_strategy=None,   # or "iqr" / "zscore" with `outlier_columns=["rawPrice"]`
+        outlier_columns=["rawPrice", "gradedPriceTen", "gradedPriceNine"],
+    )
+
+    # === Merge step (avoids duplicates) ===
+    merged = merge_data_and_prices(data_df, prices_df, cfg)
+
+    # === Clean the merged dataset ===
+    cleaned = clean_data(merged, cfg)
+
+    # Save result
+    cleaned.to_csv("/Users/callumanderson/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/raw/pokemon_merged_cleaned.csv", index=False)
+    print("Wrote merged, cleaned CSV to: /Users/callumanderson/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/raw/pokemon_merged_cleaned.csv")
