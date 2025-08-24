@@ -22,6 +22,11 @@ NUMERIC_COLS_DEFAULT = [
     "gradedPriceTen_missing",
     "gradedPriceNine_missing",
     "age_days",
+    "first_raw",
+    "price_ratio_to_first",
+    "log_raw",
+    "log_g10",
+    "log_g9",
 ]
 
 IDENTIFIER_COLS = [
@@ -34,6 +39,12 @@ IDENTIFIER_COLS = [
     "pokedex",
     "variants",
     "date",
+]
+
+TARGET_COLS = [
+    "y",
+    "y_point",
+    "y_ever",
 ]
 
 
@@ -51,7 +62,7 @@ def build_feature_frame(df: pd.DataFrame,
     cat_cols = _present_columns(df, categorical_cols or CATEGORICAL_COLS_DEFAULT)
     num_cols = _present_columns(df, numeric_cols or NUMERIC_COLS_DEFAULT)
 
-    base = df.drop(columns=_present_columns(df, IDENTIFIER_COLS), errors="ignore").copy()
+    base = df.drop(columns=_present_columns(df, IDENTIFIER_COLS + TARGET_COLS), errors="ignore").copy()
 
     onehot_cols = []
     skipped_high_card_cols = []
@@ -145,7 +156,7 @@ def main():
     args = parser.parse_args()
 
     df = pd.read_csv(args.in_path, low_memory=False)
-    for col in [
+    numeric_to_coerce = [
         "rawPrice",
         "gradedPriceTen",
         "gradedPriceNine",
@@ -153,16 +164,36 @@ def main():
         "gradedPriceTen_missing",
         "gradedPriceNine_missing",
         "age_days",
-    ]:
+        "first_raw",
+    ]
+    for col in numeric_to_coerce:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if "first_raw" in df.columns and "rawPrice" in df.columns:
+        df["price_ratio_to_first"] = np.where(
+            (df["first_raw"].notna()) & (df["first_raw"] > 0) & df["rawPrice"].notna(),
+            df["rawPrice"] / df["first_raw"],
+            np.nan,
+        )
+    if "rawPrice" in df.columns:
+        df["log_raw"] = np.log1p(df["rawPrice"].astype(float))
+    if "gradedPriceTen" in df.columns:
+        df["log_g10"] = np.log1p(df["gradedPriceTen"].astype(float))
+    if "gradedPriceNine" in df.columns:
+        df["log_g9"] = np.log1p(df["gradedPriceNine"].astype(float))
 
     X, encoder, scaler = build_feature_frame(df, max_onehot_cardinality=args.max_onehot_card)
 
     os.makedirs(os.path.dirname(args.out_path), exist_ok=True)
-    X.to_csv(args.out_path, index=False)
 
-    print(f"Feature matrix shape: {X.shape}")
+    # Also emit a sidecar file that includes **only** the primary label `y` (0/1, no blanks)
+    if 'y' in df.columns:
+        out_with_labels = args.out_path[:-4] + "_with_labels.csv" if args.out_path.lower().endswith(".csv") else args.out_path + "_with_labels.csv"
+        y_clean = pd.to_numeric(df['y'], errors='coerce').fillna(0).astype('int64')
+        X_with_y = pd.concat([X.reset_index(drop=True), y_clean.reset_index(drop=True).to_frame('y')], axis=1)
+        X_with_y.to_csv(out_with_labels, index=False)
+        print(f"Wrote features+labels to: {out_with_labels} (targets: ['y'])")
 
     cat_cols = _present_columns(df, CATEGORICAL_COLS_DEFAULT)
     num_cols = _present_columns(df, NUMERIC_COLS_DEFAULT)
@@ -172,7 +203,9 @@ def main():
 
     enc_path, sc_path, cfg_path = save_artifacts(encoder, scaler, args.artifacts_dir, onehot_cols, scale_cols, flag_cols, args.max_onehot_card)
 
-    print(f"Wrote features to: {args.out_path}")
+    if 'y' in df.columns:
+        labeled_out = args.out_path[:-4] + "_with_labels.csv" if args.out_path.lower().endswith(".csv") else args.out_path + "_with_labels.csv"
+        print(f"Wrote features+labels to: {labeled_out}")
     print(f"Saved encoder to: {enc_path}")
     print(f"Saved scaler to:  {sc_path}")
     print(f"Saved config to: {cfg_path}")

@@ -3,24 +3,17 @@ import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-"""
-    Code to clean and process the data to get ready for encoding and featrure engineering. 
-    This code produces a cleaned_sales.csv in the data/processed folder.
-"""
-
 @dataclass
 class CleanConfig:
     date_columns: List[str] = field(default_factory=list)
     date_format: Optional[str] = None
     timezone: Optional[str] = None
-
     data_card_id_col: str = "cardId"
     prices_card_id_col: str = "cardId"
     prices_date_col: str = "date"
     data_release_date_col: Optional[str] = "releaseDate"
     set_code_col: str = "expCodeTCGP"
     set_name_col: Optional[str] = "expName"
-
     data_variants_col: Optional[str] = "variants"
     prices_variant_col: Optional[str] = "variant"
     variant_map: Dict[str, str] = field(default_factory=lambda: {
@@ -35,20 +28,16 @@ class CleanConfig:
         "none": "Normal",
         "na": "Normal",
     })
-
     min_non_null_ratio: float = 0.20
     duplicates_subset: Optional[List[str]] = None
     keep_duplicate: str | bool = "first"
-
     dtype_overrides: Dict[str, str] = field(default_factory=dict)
     special_char_patterns: List[str] = field(default_factory=lambda: [r"[\r\n\t]", r"\u200b", r"\ufeff"])
-
     price_columns: List[str] = field(default_factory=lambda: [
         "rawPrice", "gradedPriceTen", "gradedPriceNine"
     ])
     price_imputation_strategy: str = "zero"
     add_missingness_flags: bool = True
-
     outlier_strategy: Optional[str] = None
     outlier_columns: Optional[List[str]] = None
     z_thresh: float = 3.0
@@ -102,15 +91,12 @@ def impute_release_dates(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
     rd_col = cfg.data_release_date_col
     if not rd_col or rd_col not in out.columns:
         return out
-
     set_col = None
     if cfg.set_code_col and cfg.set_code_col in out.columns:
         set_col = cfg.set_code_col
     elif cfg.set_name_col and cfg.set_name_col in out.columns:
         set_col = cfg.set_name_col
-
     out["releaseDate_missing"] = out[rd_col].isna().astype("Int8")
-
     if set_col is None:
         return out
 
@@ -329,6 +315,52 @@ if __name__ == "__main__":
     merged_df = merge_data_and_prices(data_df, prices_df, config)
     cleaned_df = clean_data(merged_df, config)
 
+    THRESH_PCT = 0.30
+
+    if 'date' in cleaned_df.columns:
+        if cleaned_df['date'].dtype.kind in {'O', 'U', 'S'}:
+            cleaned_df['date'] = pd.to_datetime(cleaned_df['date'], utc=True, errors='coerce')
+
+    cleaned_df = cleaned_df.sort_values(['idTCGP', 'date'])
+
+    if 'rawPrice_missing' in cleaned_df.columns:
+        _raw_valid = (~cleaned_df['rawPrice_missing'].astype(bool)) & (cleaned_df['rawPrice'].fillna(0) > 0)
+    else:
+        _raw_valid = cleaned_df['rawPrice'].notna() & (cleaned_df['rawPrice'] > 0)
+
+    _first_idx = cleaned_df[_raw_valid].groupby('idTCGP')['date'].idxmin()
+    _first_raw_map = cleaned_df.loc[_first_idx, ['idTCGP', 'rawPrice']].set_index('idTCGP')['rawPrice'].to_dict()
+
+    cleaned_df['first_raw'] = cleaned_df['idTCGP'].map(_first_raw_map)
+
+    _label_mask = _raw_valid & cleaned_df['first_raw'].notna()
+    cleaned_df.loc[_label_mask, 'y_point'] = (
+        cleaned_df.loc[_label_mask, 'rawPrice'] >= (1.0 + THRESH_PCT) * cleaned_df.loc[_label_mask, 'first_raw']
+    ).astype('Int8')
+
+    cleaned_df['y_point'] = cleaned_df['y_point'].astype('Int8')
+
+    cleaned_df['y_ever'] = (
+        cleaned_df
+        .sort_values(['idTCGP', 'date'])
+        .groupby('idTCGP')['y_point']
+        .transform(lambda s: (s.fillna(0).astype('Int8').cumsum() > 0).astype('Int8'))
+    )
+
+    cleaned_df['y'] = cleaned_df['y_ever'].astype('Int8')
+
     out_path = "/Users/callumanderson/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/cleaned_sales.csv"
+    cleaned_df = cleaned_df.sort_values("date")
     cleaned_df.to_csv(out_path, index=False)
+
+    try:
+        vc = cleaned_df['y'].value_counts(dropna=False)
+        print("Label distribution (y):\n", vc.to_string())
+        vc_point = cleaned_df['y_point'].value_counts(dropna=False)
+        print("Label distribution (y_point):\n", vc_point.to_string())
+        vc_ever = cleaned_df['y_ever'].value_counts(dropna=False)
+        print("Label distribution (y_ever):\n", vc_ever.to_string())
+    except Exception as e:
+        print("Label diagnostics error:", e)
+
     print(f"Wrote merged, cleaned CSV to: {out_path}")
