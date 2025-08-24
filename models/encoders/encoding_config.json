@@ -1,0 +1,1 @@
+{"onehot_cols": ["rarity", "energyType", "cardType", "variant"], "scale_cols": ["rawPrice", "gradedPriceTen", "gradedPriceNine"], "flag_cols": ["rawPrice_missing", "gradedPriceTen_missing", "gradedPriceNine_missing"], "max_onehot_cardinality": 30}
