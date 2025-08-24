@@ -78,6 +78,7 @@ def build_feature_frame(df: pd.DataFrame,
 
     flag_cols = [c for c in num_cols if c.endswith("_missing")]
     scale_cols = [c for c in num_cols if c not in flag_cols]
+    base[scale_cols] = base[scale_cols].fillna(0.0)
 
     if fit_encoder:
         if onehot_cols:
