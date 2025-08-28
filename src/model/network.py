@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 input_csv_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/pokemon_final_with_labels.csv"
@@ -22,12 +23,19 @@ targets = data[["y"]]
 features = features.to_numpy(dtype="float32")
 targets = targets.to_numpy(dtype="float32")
 
-# normalize for a mean of 0 and std of 1 and save for later predictions
+# normalize for a mean of 0 and std of 1 and save pk1 for later predictions
 scaler = StandardScaler()
 features = scaler.fit_transform(features)
 joblib.dump(scaler, encoder_path)
 
-# add feature matrix and target matrix to pytorch tensors
-X_tensor = torch.tensor(features)
-y_tensor = torch.tensor(targets)
+# now we must do a train/test split for features (x) and for targets (y)
+feature_train, feature_val, target_train, target_val = train_test_split(
+    features, targets, test_size=0.2, random_state=42
+)
 
+# convert the split numpy arrays to PyTorch tensors
+feature_train = torch.tensor(feature_train)
+target_train = torch.tensor(target_train)
+
+feature_val = torch.tensor(feature_val)
+target_val = torch.tensor(target_val)
