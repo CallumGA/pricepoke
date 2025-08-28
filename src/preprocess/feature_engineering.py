@@ -1,4 +1,3 @@
-import argparse
 import os
 import pandas as pd
 import numpy as np
@@ -149,12 +148,14 @@ def save_artifacts(encoder: OneHotEncoder | None, scaler: StandardScaler, out_di
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Encode cleaned Pokémon price data into ML-ready features.")
-    parser.add_argument("--in", dest="in_path", required=True, help="Path to cleaned merged CSV (from cleaning.py)")
-    parser.add_argument("--out", dest="out_path", required=False, default="data/processed/pokemon_features.csv", help="Where to write features CSV")
-    parser.add_argument("--artifacts", dest="artifacts_dir", required=False, default="models/encoders", help="Directory to save encoder/scaler artifacts")
-    parser.add_argument("--max-onehot-card", dest="max_onehot_card", type=int, default=30, help="Max unique categories to one-hot encode (others are skipped)")
-    args = parser.parse_args()
+    # Configuration is now hardcoded to simplify the pipeline, removing the need for command-line arguments.
+    class Config:
+        in_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/cleaned_sales.csv"
+        out_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/pokemon_final.csv"
+        artifacts_dir = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/encoders"
+        max_onehot_card = 30
+
+    args = Config()
 
     df = pd.read_csv(args.in_path, low_memory=False)
     numeric_to_coerce = [

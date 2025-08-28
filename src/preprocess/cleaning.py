@@ -299,8 +299,8 @@ def clean_data(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    data_df = pd.read_csv("/Users/callumanderson/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/raw/pokemon_data.csv")
-    prices_df = pd.read_csv("/Users/callumanderson/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/raw/pokemon_prices.csv")
+    data_df = pd.read_csv("/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/raw/pokemon_data.csv")
+    prices_df = pd.read_csv("/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/raw/pokemon_prices.csv")
 
     config = CleanConfig(
         date_columns=["releaseDate", "date"],
@@ -349,7 +349,7 @@ if __name__ == "__main__":
 
     cleaned_df['y'] = cleaned_df['y_ever'].astype('Int8')
 
-    out_path = "/Users/callumanderson/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/cleaned_sales.csv"
+    out_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/cleaned_sales.csv"
     cleaned_df = cleaned_df.sort_values("date")
     cleaned_df.to_csv(out_path, index=False)
 
