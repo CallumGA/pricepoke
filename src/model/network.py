@@ -7,6 +7,11 @@ import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
+
+"""
+    Prepare the data for training
+"""
+
 input_csv_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/pokemon_final_with_labels.csv"
 encoder_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/encoders/scaler.pkl"
 
@@ -39,3 +44,21 @@ target_train = torch.tensor(target_train)
 
 feature_val = torch.tensor(feature_val)
 target_val = torch.tensor(target_val)
+
+
+"""
+    Neural Network Classifier Architecture
+"""
+class PricePredictor(nn.Module):
+    def __init__(self, input_size):
+        super(PricePredictor, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_size, 256),    # <-- input layer
+            nn.ReLU(),
+            nn.Linear(256, 128), # <-- hidden layer
+            nn.ReLU(),
+            nn.Linear(128, 1)    # <-- output layer
+        )
+
+    def forward(self, x):
+        return self.model(x)
