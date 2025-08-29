@@ -22,6 +22,7 @@ def train_model(
     Training loop with early stopping.
     """
     best_val_loss = float("inf")
+    best_val_acc = 0.0
     epochs_no_improve = 0
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -84,8 +85,10 @@ def train_model(
         # early stopping check - we stop the training if the model has not improved by 10 epochs
         if epoch_val_loss < best_val_loss:
             best_val_loss = epoch_val_loss
+            best_val_acc = epoch_val_acc
             epochs_no_improve = 0
             torch.save(model.state_dict(), model_save_path)
+            print(f"Validation loss decreased. Saving model with Val Acc: {epoch_val_acc:.4f}")
         else:
             epochs_no_improve += 1
 
@@ -94,7 +97,7 @@ def train_model(
             break
 
     print("Finished Training.")
-    print(f"Best validation loss: {best_val_loss:.4f}")
+    print(f"Best Model Performance -> Validation Loss: {best_val_loss:.4f} | Validation Accuracy: {best_val_acc:.4f}")
 
 
 if __name__ == "__main__":

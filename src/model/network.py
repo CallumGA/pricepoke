@@ -22,11 +22,22 @@ def get_dataloaders(batch_size=64):
     # load labeled csv
     data = pd.read_csv(input_csv_path)
 
+    # --- Feature Selection ---
+    # Explicitly define which columns are features vs. identifiers or targets.
+    # This is crucial for ensuring the model only trains on relevant data.
+    # Add any other non-feature columns (like card names, set names, etc.) to identifier_cols.
+    identifier_cols = ['tcgplayer_id'] 
+    target_col = 'y'
+    feature_cols = [c for c in data.columns if c not in identifier_cols and c != target_col]
+
+    if not feature_cols:
+        raise ValueError("No feature columns were found. Check your CSV and identifier_cols list.")
+
     # split features (x)
-    features = data[[c for c in data.columns if c != "y"]]
+    features = data[feature_cols]
 
     # split target (y)
-    targets = data[["y"]]
+    targets = data[[target_col]]
 
     # convert the dataframe to numpy matrix to ensure shape is defined
     features = features.to_numpy(dtype="float32")
@@ -69,5 +80,3 @@ class PricePredictor(nn.Module):
 
     def forward(self, x):
         return self.model(x)
-
-
