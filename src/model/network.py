@@ -7,6 +7,7 @@ import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import TensorDataset, DataLoader
+import config
 
 
 """
@@ -16,19 +17,14 @@ from torch.utils.data import TensorDataset, DataLoader
 
 def get_dataloaders(batch_size=64):
 
-    input_csv_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/pokemon_final_with_labels.csv"
-    encoder_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/encoders/scaler.pkl"
-
     # load labeled csv
-    data = pd.read_csv(input_csv_path)
+    data = pd.read_csv(config.INPUT_CSV_PATH)
 
     # --- Feature Selection ---
     # Explicitly define which columns are features vs. identifiers or targets.
     # This is crucial for ensuring the model only trains on relevant data.
     # Add any other non-feature columns (like card names, set names, etc.) to identifier_cols.
-    identifier_cols = ['tcgplayer_id'] 
-    target_col = 'y'
-    feature_cols = [c for c in data.columns if c not in identifier_cols and c != target_col]
+    feature_cols = [c for c in data.columns if c not in config.IDENTIFIER_COLS and c != config.TARGET_COL]
 
     if not feature_cols:
         raise ValueError("No feature columns were found. Check your CSV and identifier_cols list.")
@@ -37,7 +33,7 @@ def get_dataloaders(batch_size=64):
     features = data[feature_cols]
 
     # split target (y)
-    targets = data[[target_col]]
+    targets = data[[config.TARGET_COL]]
 
     # convert the dataframe to numpy matrix to ensure shape is defined
     features = features.to_numpy(dtype="float32")
@@ -46,7 +42,7 @@ def get_dataloaders(batch_size=64):
     # normalize for a mean of 0 and std of 1 and save pk1 for later predictions
     scaler = StandardScaler()
     features = scaler.fit_transform(features)
-    joblib.dump(scaler, encoder_path)
+    joblib.dump(scaler, config.SCALER_PATH)
 
     # now we must do a train/test split for features (x) and for targets (y)
     feature_train, feature_val, target_train, target_val = train_test_split(

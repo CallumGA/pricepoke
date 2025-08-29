@@ -5,6 +5,7 @@ import numpy as np
 import argparse
 
 from network import PricePredictor
+import config
 
 
 def predict(model, scaler, input_features):
@@ -42,19 +43,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     tcgplayer_id_to_predict = args.id
 
-    # --- Configuration ---
-    MODEL_PATH = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/price_predictor.pth"
-    SCALER_PATH = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/encoders/scaler.pkl"
-    DATA_PATH = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/pokemon_final_with_labels.csv"
-
     # --- Load Data and Model ---
     # We load the final processed data file, as it contains the features in the exact
     # format the model was trained on.
-    full_data = pd.read_csv(DATA_PATH)
+    full_data = pd.read_csv(config.INPUT_CSV_PATH)
 
     # Check if the tcgplayer_id column exists
     if 'tcgplayer_id' not in full_data.columns:
-        print(f"Error: 'tcgplayer_id' column not found in {DATA_PATH}.")
+        print(f"Error: 'tcgplayer_id' column not found in {config.INPUT_CSV_PATH}.")
         print("Please ensure your final processed CSV contains this identifier column.")
         exit()
 
@@ -71,23 +67,20 @@ if __name__ == "__main__":
     # --- Define Feature Columns (MUST MATCH TRAINING SCRIPT) ---
     # We explicitly define which columns are identifiers and which is the target,
     # so we can isolate the feature columns the model expects.
-    # Add any other non-feature/identifier columns to this list.
-    identifier_cols = ['tcgplayer_id'] # e.g., ['tcgplayer_id', 'card_name']
-    target_col = 'y'
-    feature_columns = [c for c in full_data.columns if c not in identifier_cols and c != target_col]
+    feature_columns = [c for c in full_data.columns if c not in config.IDENTIFIER_COLS and c != config.TARGET_COL]
 
     # Load the scaler
-    scaler = joblib.load(SCALER_PATH)
+    scaler = joblib.load(config.SCALER_PATH)
 
     # Load the model
     input_size = len(feature_columns)
     model = PricePredictor(input_size=input_size)
-    model.load_state_dict(torch.load(MODEL_PATH))
+    model.load_state_dict(torch.load(config.MODEL_SAVE_PATH))
 
     # --- Make a Prediction on a Sample ---
     # Get a sample card's features and its true label
     sample_features = card_sample[feature_columns]
-    true_label = bool(card_sample[target_col])
+    true_label = bool(card_sample[config.TARGET_COL])
 
     # Get the prediction
     predicted_class, probability = predict(model, scaler, sample_features)
@@ -101,6 +94,13 @@ if __name__ == "__main__":
 
     print(f"Analyzing Card: {card_name_display}")
     print(f"Model Prediction: '{predicted_class}' (Will it rise 30% in 6 months?)")
-    print(f"Prediction Confidence: {probability:.2%}")
+
+    # Calculate and display the confidence in the *actual* prediction made
+    if predicted_class:  # If the prediction was 'True'
+        confidence_in_prediction = probability
+    else:  # If the prediction was 'False'
+        confidence_in_prediction = 1 - probability
+
+    print(f"Confidence in this Prediction: {confidence_in_prediction:.2%}")
     print(f"Actual Result in Dataset: '{true_label}'")
     print("-----------------------")

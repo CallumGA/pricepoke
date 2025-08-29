@@ -28,6 +28,7 @@ NUMERIC_COLS_DEFAULT = [
     "log_raw",
     "log_g10",
     "log_g9",
+    "price_vs_rolling_avg",
 ]
 
 IDENTIFIER_COLS = [
@@ -160,6 +161,42 @@ def main():
     args = Config()
 
     df = pd.read_csv(args.in_path, low_memory=False)
+
+    # --- Create Historical Features (MUST be done before deduplication) ---
+    # We use the full time-series data to calculate trend-based features.
+    # This gives the model a "memory" of the card's recent price momentum.
+    if "rawPrice" in df.columns and "idTCGP" in df.columns and "date" in df.columns:
+        print("Creating historical trend features...")
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        # We must sort by date to ensure the rolling window is correct
+        df.sort_values(by=["idTCGP", "date"], inplace=True)
+
+        # Calculate a 7-day rolling average price for each card.
+        df['rolling_avg_price_7d'] = df.groupby('idTCGP')['rawPrice'].transform(
+            lambda x: x.rolling(window=7, min_periods=2).mean()
+        )
+
+        # Calculate the ratio of the current price to the rolling average.
+        df['price_vs_rolling_avg'] = df['rawPrice'] / df['rolling_avg_price_7d']
+
+        # Replace infinite values (from division by zero) and fill NaNs.
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
+        df['price_vs_rolling_avg'].fillna(1.0, inplace=True)
+
+        # We can now drop the intermediate rolling average column.
+        df.drop(columns=['rolling_avg_price_7d'], inplace=True)
+        print("Historical trend features created.\n")
+
+    # --- Deduplicate Data to Keep Only the Most Recent Entry Per Card ---
+    if "date" in df.columns and "idTCGP" in df.columns:
+        print("Deduplicating data to keep only the most recent entry per card...")
+        df.dropna(subset=["date"], inplace=True) # Drop rows where date could not be parsed
+        df.sort_values(by=["idTCGP", "date"], inplace=True)
+
+        initial_rows = len(df)
+        df.drop_duplicates(subset=["idTCGP"], keep="last", inplace=True)
+        final_rows = len(df)
+        print(f"Deduplication complete. Processed {initial_rows} rows down to {final_rows} unique cards.\n")
     numeric_to_coerce = [
         "rawPrice",
         "gradedPriceTen",
@@ -195,15 +232,20 @@ def main():
     if 'y' in df.columns and 'idTCGP' in df.columns:
         out_with_labels = args.out_path[:-4] + "_with_labels.csv" if args.out_path.lower().endswith(".csv") else args.out_path + "_with_labels.csv"
         
-        # Prepare the identifier column, renaming for consistency with other scripts
-        id_col = df[['idTCGP']].rename(columns={'idTCGP': 'tcgplayer_id'})
+        # Prepare identifier columns, renaming for consistency with other scripts
+        # We include 'name' here so the prediction script can display it.
+        id_cols = df[['idTCGP', 'name']].rename(columns={'idTCGP': 'tcgplayer_id'})
 
         # Prepare the target column
-        y_clean = pd.to_numeric(df['y'], errors='coerce').fillna(0).astype('int64')
+        # This is a more robust way to clean the target column.
+        # It warns if any values are being silently changed, which is crucial for data integrity.
+        y_series = pd.to_numeric(df['y'], errors='coerce')
+
+        y_clean = y_series.fillna(0).astype('int64')
 
         # Combine identifier, features, and target into the final dataframe
         X_with_id_and_y = pd.concat([
-            id_col.reset_index(drop=True),
+            id_cols.reset_index(drop=True),
             X.reset_index(drop=True),
             y_clean.reset_index(drop=True).to_frame('y')
         ], axis=1)

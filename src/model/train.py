@@ -4,8 +4,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+import pandas as pd
 
 from network import PricePredictor, get_dataloaders
+import config
 
 
 def train_model(
@@ -107,15 +109,37 @@ if __name__ == "__main__":
     NUM_EPOCHS = 200
     # stop if val loss doesn't improve for 10 epochs in a row
     PATIENCE = 10
-    MODEL_SAVE_PATH = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/price_predictor.pth"
 
     # data, model, loss, optimizer
     train_loader, val_loader, input_size = get_dataloaders(batch_size=BATCH_SIZE)
     model = PricePredictor(input_size=input_size)
     
-    # BCEWithLogitsLoss for binary classification
-    criterion = nn.BCEWithLogitsLoss()
+    # --- Handle Class Imbalance with Weighted Loss ---
+    # Calculate weights to penalize errors on the minority class more heavily.
+    # This is crucial when one class (e.g., 'False') dominates the dataset.
+    full_data = pd.read_csv(config.INPUT_CSV_PATH)
+    class_counts = full_data[config.TARGET_COL].value_counts()
+    count_false = class_counts.get(0, 0)
+    count_true = class_counts.get(1, 0)
+
+    if count_true > 0:
+        # The raw ratio can be too aggressive, leading the model to always predict the
+        # minority class. Taking the square root is a common technique to dampen
+        # the weight while still penalizing errors on the minority class.
+        raw_ratio = count_false / count_true
+        pos_weight = np.sqrt(raw_ratio)
+        print(f"Class Imbalance Detected: {count_false} 'False' vs {count_true} 'True' (Ratio: {raw_ratio:.2f}).")
+        print(f"Applying a dampened positive class weight of {pos_weight:.2f} to compensate.")
+    else:
+        pos_weight = 1.0  # Default if there are no positive samples
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    pos_weight_tensor = torch.tensor([pos_weight], device=device)
+
+    # pass in a penalty weight to the loss function for getting a "true" wrong
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     # begin training
-    train_model(model, criterion, optimizer, train_loader, val_loader, NUM_EPOCHS, PATIENCE, MODEL_SAVE_PATH)
+    train_model(model, criterion, optimizer, train_loader, val_loader, NUM_EPOCHS, PATIENCE, config.MODEL_SAVE_PATH)
