@@ -5,6 +5,8 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 import joblib
 import json
 
+# TODO: clean this up significantly
+
 CATEGORICAL_COLS_DEFAULT = [
     "rarity",
     "energyType",

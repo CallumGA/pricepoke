@@ -3,6 +3,8 @@ import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+# TODO: clean this up significantly
+
 @dataclass
 class CleanConfig:
     date_columns: List[str] = field(default_factory=list)

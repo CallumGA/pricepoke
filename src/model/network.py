@@ -6,44 +6,51 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from torch.utils.data import TensorDataset, DataLoader
 
 
 """
     Prepare the data for training
 """
 
-input_csv_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/pokemon_final_with_labels.csv"
-encoder_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/encoders/scaler.pkl"
 
-# load labeled csv
-data = pd.read_csv(input_csv_path)
+def get_dataloaders(batch_size=64):
 
-# split features (x)
-features = data[[c for c in data.columns if c != "y"]]
+    input_csv_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/pokemon_final_with_labels.csv"
+    encoder_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/encoders/scaler.pkl"
 
-# split target (y)
-targets = data[["y"]]
+    # load labeled csv
+    data = pd.read_csv(input_csv_path)
 
-# convert the dataframe to numpy matrix to ensure shape is defined
-features = features.to_numpy(dtype="float32")
-targets = targets.to_numpy(dtype="float32")
+    # split features (x)
+    features = data[[c for c in data.columns if c != "y"]]
 
-# normalize for a mean of 0 and std of 1 and save pk1 for later predictions
-scaler = StandardScaler()
-features = scaler.fit_transform(features)
-joblib.dump(scaler, encoder_path)
+    # split target (y)
+    targets = data[["y"]]
 
-# now we must do a train/test split for features (x) and for targets (y)
-feature_train, feature_val, target_train, target_val = train_test_split(
-    features, targets, test_size=0.2, random_state=42
-)
+    # convert the dataframe to numpy matrix to ensure shape is defined
+    features = features.to_numpy(dtype="float32")
+    targets = targets.to_numpy(dtype="float32")
 
-# convert the split numpy arrays to PyTorch tensors
-feature_train = torch.tensor(feature_train)
-target_train = torch.tensor(target_train)
+    # normalize for a mean of 0 and std of 1 and save pk1 for later predictions
+    scaler = StandardScaler()
+    features = scaler.fit_transform(features)
+    joblib.dump(scaler, encoder_path)
 
-feature_val = torch.tensor(feature_val)
-target_val = torch.tensor(target_val)
+    # now we must do a train/test split for features (x) and for targets (y)
+    feature_train, feature_val, target_train, target_val = train_test_split(
+        features, targets, test_size=0.2, random_state=42
+    )
+
+    # convert the split numpy arrays to PyTorch tensors and create datasets
+    train_dataset = TensorDataset(torch.tensor(feature_train), torch.tensor(target_train))
+    val_dataset = TensorDataset(torch.tensor(feature_val), torch.tensor(target_val))
+
+    # create dataloaders
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False)
+
+    return train_loader, val_loader, feature_train.shape[1]
 
 
 """
@@ -62,3 +69,5 @@ class PricePredictor(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+
