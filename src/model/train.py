@@ -1,5 +1,3 @@
-
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,13 +5,12 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 from typing import Tuple
-
 from network import PricePredictor, get_dataloaders
 import config
 
+# TODO: move out data class to its own file, clean up code and review exactly
 
-# A dataclass is a great way to group related configuration variables.
-# It makes the code cleaner and easier to manage than having loose variables.
+
 @dataclass
 class TrainingConfig:
     batch_size: int = 64

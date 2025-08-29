@@ -3,9 +3,10 @@ import joblib
 import pandas as pd
 import numpy as np
 import argparse
-
 from network import PricePredictor
 import config
+
+# TODO: clean this up significantly
 
 
 def predict(model, scaler, input_features):

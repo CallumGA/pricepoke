@@ -20,10 +20,7 @@ def get_dataloaders(batch_size=64):
     # load labeled csv
     data = pd.read_csv(config.INPUT_CSV_PATH)
 
-    # --- Feature Selection ---
-    # Explicitly define which columns are features vs. identifiers or targets.
-    # This is crucial for ensuring the model only trains on relevant data.
-    # Add any other non-feature columns (like card names, set names, etc.) to identifier_cols.
+    # define features vs. targets in the config, pull them for use in network
     feature_cols = [c for c in data.columns if c not in config.IDENTIFIER_COLS and c != config.TARGET_COL]
 
     if not feature_cols:
