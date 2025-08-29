@@ -3,7 +3,7 @@ import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-# TODO: clean this up significantly
+# TODO: CLEANUP AND COMMENT EXPLANATIONS!
 
 @dataclass
 class CleanConfig:

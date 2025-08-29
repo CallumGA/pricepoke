@@ -7,6 +7,9 @@ import logging
 import tempfile
 import os
 
+
+# TODO: CLEANUP AND COMMENT EXPLANATIONS!
+
 # --- Configuration ---
 
 # Setup logging for clear output

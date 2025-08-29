@@ -8,7 +8,7 @@ from typing import Tuple
 from network import PricePredictor, get_dataloaders
 import config
 
-# TODO: move out data class to its own file, clean up code and review exactly
+# TODO: CLEANUP AND COMMENT EXPLANATIONS!
 # TODO: run SHAP on the model to see which features affect the predictions/model the most...
 
 

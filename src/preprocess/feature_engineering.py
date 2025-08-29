@@ -5,7 +5,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 import joblib
 import json
 
-# TODO: clean this up significantly
+# TODO: CLEANUP AND COMMENT EXPLANATIONS!
 
 CATEGORICAL_COLS_DEFAULT = [
     "rarity",

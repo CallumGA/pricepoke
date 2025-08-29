@@ -14,6 +14,8 @@ import config
     Prepare the data for training
 """
 
+# TODO: CLEANUP AND COMMENT EXPLANATIONS!
+
 
 def get_dataloaders(batch_size=64):
 
