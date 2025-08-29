@@ -2,6 +2,7 @@ import torch
 import joblib
 import pandas as pd
 import numpy as np
+import argparse
 
 from network import PricePredictor
 
@@ -29,11 +30,22 @@ def predict(model, scaler, input_features):
 
 
 if __name__ == "__main__":
+    # --- Argument Parsing ---
+    # Set up the script to accept a command-line argument for the card ID
+    parser = argparse.ArgumentParser(description="Predict Pokémon card price trends.")
+    parser.add_argument(
+        "--id",
+        type=int,
+        required=True,
+        help="The TCGPlayer ID of the card to predict.",
+    )
+    args = parser.parse_args()
+    tcgplayer_id_to_predict = args.id
+
+    # --- Configuration ---
     MODEL_PATH = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/price_predictor.pth"
     SCALER_PATH = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/models/encoders/scaler.pkl"
     DATA_PATH = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/pokemon_final_with_labels.csv"
-    # The TCGPlayer ID for the card you want to predict
-    TCGPLAYER_ID_TO_PREDICT = 283798  # Mimikyu from Trick or Trade BOOster Bundle
 
     # --- Load Data and Model ---
     # We load the final processed data file, as it contains the features in the exact
@@ -47,10 +59,10 @@ if __name__ == "__main__":
         exit()
 
     # Find the specific card's data by its ID
-    card_data_row = full_data[full_data['tcgplayer_id'] == TCGPLAYER_ID_TO_PREDICT]
+    card_data_row = full_data[full_data['tcgplayer_id'] == tcgplayer_id_to_predict]
 
     if card_data_row.empty:
-        print(f"Error: Card with tcgplayer_id '{TCGPLAYER_ID_TO_PREDICT}' not found in the dataset.")
+        print(f"Error: Card with tcgplayer_id '{tcgplayer_id_to_predict}' not found in the dataset.")
         exit()
     
     # Take the first row if multiple entries exist for the same ID
@@ -83,9 +95,9 @@ if __name__ == "__main__":
     # --- Display Results ---
     print("--- Prediction Report ---")
     # Try to display card name if available for better context
-    card_name_display = f" (ID: {TCGPLAYER_ID_TO_PREDICT})"
+    card_name_display = f" (ID: {tcgplayer_id_to_predict})"
     if 'name' in card_sample and pd.notna(card_sample['name']):
-        card_name_display = f" ({card_sample['name']}, ID: {TCGPLAYER_ID_TO_PREDICT})"
+        card_name_display = f" ({card_sample['name']}, ID: {tcgplayer_id_to_predict})"
 
     print(f"Analyzing Card: {card_name_display}")
     print(f"Model Prediction: '{predicted_class}' (Will it rise 30% in 6 months?)")

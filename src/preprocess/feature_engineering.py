@@ -191,12 +191,23 @@ def main():
 
     os.makedirs(os.path.dirname(args.out_path), exist_ok=True)
 
-    # Also emit a sidecar file that includes **only** the primary label `y` (0/1, no blanks)
-    if 'y' in df.columns:
+    # Also emit a sidecar file that includes the identifier, features, and the primary label `y`
+    if 'y' in df.columns and 'idTCGP' in df.columns:
         out_with_labels = args.out_path[:-4] + "_with_labels.csv" if args.out_path.lower().endswith(".csv") else args.out_path + "_with_labels.csv"
+        
+        # Prepare the identifier column, renaming for consistency with other scripts
+        id_col = df[['idTCGP']].rename(columns={'idTCGP': 'tcgplayer_id'})
+
+        # Prepare the target column
         y_clean = pd.to_numeric(df['y'], errors='coerce').fillna(0).astype('int64')
-        X_with_y = pd.concat([X.reset_index(drop=True), y_clean.reset_index(drop=True).to_frame('y')], axis=1)
-        X_with_y.to_csv(out_with_labels, index=False)
+
+        # Combine identifier, features, and target into the final dataframe
+        X_with_id_and_y = pd.concat([
+            id_col.reset_index(drop=True),
+            X.reset_index(drop=True),
+            y_clean.reset_index(drop=True).to_frame('y')
+        ], axis=1)
+        X_with_id_and_y.to_csv(out_with_labels, index=False)
         print(f"Wrote features+labels to: {out_with_labels} (targets: ['y'])")
 
     cat_cols = _present_columns(df, CATEGORICAL_COLS_DEFAULT)
