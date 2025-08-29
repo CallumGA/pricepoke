@@ -5,23 +5,97 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import pandas as pd
+from dataclasses import dataclass
+from typing import Tuple
 
 from network import PricePredictor, get_dataloaders
 import config
 
 
+# A dataclass is a great way to group related configuration variables.
+# It makes the code cleaner and easier to manage than having loose variables.
+@dataclass
+class TrainingConfig:
+    batch_size: int = 64
+    learning_rate: float = 0.001
+    num_epochs: int = 200
+    patience: int = 10  # For early stopping
+    model_save_path: str = config.MODEL_SAVE_PATH
+    input_csv_path: str = config.INPUT_CSV_PATH
+    target_col: str = config.TARGET_COL
+
+
+def _train_epoch(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    criterion: nn.Module,
+    optimizer: optim.Optimizer,
+    device: torch.device,
+) -> Tuple[float, float]:
+    """Trains the model for one epoch."""
+    model.train()
+    running_loss = 0.0
+    correct_predictions = 0
+    total_samples = 0
+
+    for features, targets in dataloader:
+        features, targets = features.to(device), targets.to(device)
+
+        optimizer.zero_grad()
+        outputs = model(features)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item() * features.size(0)
+
+        predicted = torch.round(torch.sigmoid(outputs))
+        total_samples += targets.size(0)
+        correct_predictions += (predicted == targets).sum().item()
+
+    epoch_loss = running_loss / total_samples
+    epoch_acc = correct_predictions / total_samples
+    return epoch_loss, epoch_acc
+
+
+def _validate_epoch(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    criterion: nn.Module,
+    device: torch.device,
+) -> Tuple[float, float]:
+    """Validates the model for one epoch."""
+    model.eval()
+    running_loss = 0.0
+    correct_predictions = 0
+    total_samples = 0
+
+    with torch.no_grad():
+        for features, targets in dataloader:
+            features, targets = features.to(device), targets.to(device)
+            outputs = model(features)
+            loss = criterion(outputs, targets)
+            running_loss += loss.item() * features.size(0)
+
+            predicted = torch.round(torch.sigmoid(outputs))
+            total_samples += targets.size(0)
+            correct_predictions += (predicted == targets).sum().item()
+
+    epoch_loss = running_loss / total_samples
+    epoch_acc = correct_predictions / total_samples
+    return epoch_loss, epoch_acc
+
+
 def train_model(
-    model,
-    criterion,
-    optimizer,
-    train_loader,
-    val_loader,
-    num_epochs,
-    patience,
-    model_save_path,
+    model: nn.Module,
+    criterion: nn.Module,
+    optimizer: optim.Optimizer,
+    train_loader: torch.utils.data.DataLoader,
+    val_loader: torch.utils.data.DataLoader,
+    cfg: TrainingConfig,
 ):
     """
-    Training loop with early stopping.
+    Main training loop with early stopping.
     """
     best_val_loss = float("inf")
     best_val_acc = 0.0
@@ -29,117 +103,101 @@ def train_model(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    print(f"Starting training on {device}...")
+    print(f"Starting training on {device} for {cfg.num_epochs} epochs...")
 
-    for epoch in range(num_epochs):
-        # training
-        model.train()
-        train_running_loss = 0.0
-        train_correct = 0
-        train_total = 0
-        for features, targets in train_loader:
-            features, targets = features.to(device), targets.to(device)
+    for epoch in range(cfg.num_epochs):
+        train_loss, train_acc = _train_epoch(
+            model, train_loader, criterion, optimizer, device
+        )
+        val_loss, val_acc = _validate_epoch(model, val_loader, criterion, device)
 
-            # zero the parameter gradients
-            optimizer.zero_grad()
-
-            # forward pass + back prop + optimize weights/bias
-            outputs = model(features)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            optimizer.step()
-
-            train_running_loss += loss.item() * features.size(0)
-
-            # calculate accuracy
-            predicted = torch.round(torch.sigmoid(outputs))
-            train_total += targets.size(0)
-            train_correct += (predicted == targets).sum().item()
-
-        epoch_train_loss = train_running_loss / len(train_loader.dataset)
-        epoch_train_acc = train_correct / train_total
-
-        # validation
-        model.eval()
-        val_loss = 0.0
-        val_correct = 0
-        val_total = 0
-        with torch.no_grad():
-            for features, targets in val_loader:
-                features, targets = features.to(device), targets.to(device)
-                outputs = model(features)
-                loss = criterion(outputs, targets)
-                val_loss += loss.item() * features.size(0)
-
-                # calculate accuracy
-                predicted = torch.round(torch.sigmoid(outputs))
-                val_total += targets.size(0)
-                val_correct += (predicted == targets).sum().item()
-
-        epoch_val_loss = val_loss / len(val_loader.dataset)
-        epoch_val_acc = val_correct / val_total
         print(
-            f"Epoch {epoch+1}/{num_epochs} | "
-            f"Train Loss: {epoch_train_loss:.4f}, Train Acc: {epoch_train_acc:.4f} | "
-            f"Val Loss: {epoch_val_loss:.4f}, Val Acc: {epoch_val_acc:.4f}"
+            f"Epoch {epoch+1}/{cfg.num_epochs} | "
+            f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f} | "
+            f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}"
         )
 
-        # early stopping check - we stop the training if the model has not improved by 10 epochs
-        if epoch_val_loss < best_val_loss:
-            best_val_loss = epoch_val_loss
-            best_val_acc = epoch_val_acc
+        # Early stopping check: save the model only if validation loss improves.
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_val_acc = val_acc
             epochs_no_improve = 0
-            torch.save(model.state_dict(), model_save_path)
-            print(f"Validation loss decreased. Saving model with Val Acc: {epoch_val_acc:.4f}")
+            torch.save(model.state_dict(), cfg.model_save_path)
+            print(f"Validation loss decreased. Saving model with Val Acc: {val_acc:.4f}")
         else:
             epochs_no_improve += 1
 
-        if epochs_no_improve >= patience:
-            print(f"Early stopping triggered after {patience} epochs with no improvement.")
+        if epochs_no_improve >= cfg.patience:
+            print(
+                f"Early stopping triggered after {cfg.patience} epochs with no improvement."
+            )
             break
 
-    print("Finished Training.")
-    print(f"Best Model Performance -> Validation Loss: {best_val_loss:.4f} | Validation Accuracy: {best_val_acc:.4f}")
+    print("\nFinished Training.")
+    print(
+        f"Best Model Performance -> Validation Loss: {best_val_loss:.4f} | Validation Accuracy: {best_val_acc:.4f}"
+    )
+    print(f"Model saved to {cfg.model_save_path}")
+
+
+def get_class_weights(train_loader: torch.utils.data.DataLoader) -> torch.Tensor:
+    """
+    Calculates class weights for handling imbalanced datasets.
+    This is more efficient than re-reading the CSV file.
+    """
+    # Accessing the underlying dataset's targets is much more efficient
+    # than reloading the entire CSV. This assumes the custom Dataset
+    # stores targets in a way that can be accessed.
+    try:
+        targets = train_loader.dataset.targets
+        if isinstance(targets, torch.Tensor):
+            targets = targets.numpy()
+
+        class_counts = pd.Series(targets.flatten()).value_counts()
+        count_false = class_counts.get(0, 0)
+        count_true = class_counts.get(1, 0)
+    except AttributeError:
+        # Fallback to reading the CSV if the dataset doesn't expose targets
+        print("Warning: Could not access targets from DataLoader. Falling back to reading CSV.")
+        full_data = pd.read_csv(config.INPUT_CSV_PATH)
+        class_counts = full_data[config.TARGET_COL].value_counts()
+        count_false = class_counts.get(0, 0)
+        count_true = class_counts.get(1, 0)
+
+    pos_weight = 1.0
+    if count_true > 0 and count_false > 0:
+        raw_ratio = count_false / count_true
+        # The raw ratio can be too aggressive. Taking the square root is a common
+        # technique to dampen the weight while still penalizing errors on the minority class.
+        pos_weight = np.sqrt(raw_ratio)
+        print(
+            f"Class Imbalance Detected: {count_false} 'False' vs {count_true} 'True' (Ratio: {raw_ratio:.2f})."
+        )
+        print(f"Applying a dampened positive class weight of {pos_weight:.2f} to compensate.")
+    else:
+        print("No class imbalance detected or one class is missing. Using default weight.")
+
+    return torch.tensor([pos_weight])
 
 
 if __name__ == "__main__":
-    BATCH_SIZE = 64
-    LEARNING_RATE = 0.001
-    # high number, early stopping will find the best one
-    NUM_EPOCHS = 200
-    # stop if val loss doesn't improve for 10 epochs in a row
-    PATIENCE = 10
+    # --- Configuration ---
+    # Using a dataclass for configuration makes the script cleaner and easier to modify.
+    cfg = TrainingConfig()
 
-    # data, model, loss, optimizer
-    train_loader, val_loader, input_size = get_dataloaders(batch_size=BATCH_SIZE)
+    # --- Data, Model, Loss, Optimizer ---
+    train_loader, val_loader, input_size = get_dataloaders(batch_size=cfg.batch_size)
     model = PricePredictor(input_size=input_size)
-    
+
     # --- Handle Class Imbalance with Weighted Loss ---
-    # Calculate weights to penalize errors on the minority class more heavily.
-    # This is crucial when one class (e.g., 'False') dominates the dataset.
-    full_data = pd.read_csv(config.INPUT_CSV_PATH)
-    class_counts = full_data[config.TARGET_COL].value_counts()
-    count_false = class_counts.get(0, 0)
-    count_true = class_counts.get(1, 0)
-
-    if count_true > 0:
-        # The raw ratio can be too aggressive, leading the model to always predict the
-        # minority class. Taking the square root is a common technique to dampen
-        # the weight while still penalizing errors on the minority class.
-        raw_ratio = count_false / count_true
-        pos_weight = np.sqrt(raw_ratio)
-        print(f"Class Imbalance Detected: {count_false} 'False' vs {count_true} 'True' (Ratio: {raw_ratio:.2f}).")
-        print(f"Applying a dampened positive class weight of {pos_weight:.2f} to compensate.")
-    else:
-        pos_weight = 1.0  # Default if there are no positive samples
-
+    pos_weight_tensor = get_class_weights(train_loader)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    pos_weight_tensor = torch.tensor([pos_weight], device=device)
+    pos_weight_tensor = pos_weight_tensor.to(device)
 
-    # pass in a penalty weight to the loss function for getting a "true" wrong
+    # Pass the calculated weight to the loss function to penalize errors on the
+    # minority class more heavily.
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+    optimizer = optim.Adam(model.parameters(), lr=cfg.learning_rate)
 
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-
-    # begin training
-    train_model(model, criterion, optimizer, train_loader, val_loader, NUM_EPOCHS, PATIENCE, config.MODEL_SAVE_PATH)
+    # --- Begin Training ---
+    train_model(model, criterion, optimizer, train_loader, val_loader, cfg)

@@ -178,37 +178,73 @@ def coerce_price_columns_numeric(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataF
 def merge_data_and_prices(data_df: pd.DataFrame, prices_df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
     data = data_df.copy()
     prices = prices_df.copy()
+
+    # Basic validations
     if cfg.data_card_id_col not in data.columns:
         raise KeyError(f"Missing data key column: {cfg.data_card_id_col}")
     if cfg.prices_card_id_col not in prices.columns:
         raise KeyError(f"Missing prices key column: {cfg.prices_card_id_col}")
+
+    # Parse dates
     if cfg.data_release_date_col and cfg.data_release_date_col in data.columns:
         data[cfg.data_release_date_col] = pd.to_datetime(data[cfg.data_release_date_col], errors="coerce", utc=True)
     if cfg.prices_date_col in prices.columns:
         prices[cfg.prices_date_col] = pd.to_datetime(prices[cfg.prices_date_col], errors="coerce", utc=True)
+
+    # Normalize numeric types
     prices = coerce_price_columns_numeric(prices, cfg)
-    if cfg.prices_variant_col and cfg.prices_variant_col in prices.columns:
-        prices[cfg.prices_variant_col] = prices[cfg.prices_variant_col].apply(
-            lambda v: _normalize_variant_value(v if pd.notna(v) else "", cfg)
-        )
+
+    # Normalize variant column in prices
+    variant_col = cfg.prices_variant_col or "variant"
+    if variant_col in prices.columns:
+        prices[variant_col] = prices[variant_col].apply(lambda v: _normalize_variant_value(v, cfg))
     else:
-        prices[cfg.prices_variant_col or "variant"] = None
+        prices[variant_col] = None
+
+    # Normalize and explode data variants
     data_expanded = normalize_and_explode_variants(data, cfg)
+
+    # Drop duplicate price entries
     dedupe_subset = [cfg.prices_date_col, cfg.prices_card_id_col]
-    if cfg.prices_variant_col:
-        dedupe_subset.append(cfg.prices_variant_col)
+    if variant_col in prices.columns:
+        dedupe_subset.append(variant_col)
     prices = prices.drop_duplicates(subset=dedupe_subset, keep="first")
-    left_on = [cfg.data_card_id_col, "variant"]
-    right_on = [cfg.prices_card_id_col, cfg.prices_variant_col or "variant"]
-    merged = pd.merge(
+
+    # === Pass 1: Strict merge on cardId + variant
+    merged_strict = pd.merge(
         data_expanded,
         prices,
         how="left",
-        left_on=left_on,
-        right_on=right_on,
-        suffixes=("", "_price"),
+        left_on=[cfg.data_card_id_col, "variant"],
+        right_on=[cfg.prices_card_id_col, variant_col],
+        suffixes=("", "_price")
     )
-    return merged
+
+    # Identify cardIds that did not match prices in pass 1
+    unmatched_card_ids = merged_strict[merged_strict["rawPrice"].isna()][cfg.data_card_id_col].unique()
+
+    # === Pass 2: Fallback loose merge on just cardId
+    fallback_rows = data_expanded[data_expanded[cfg.data_card_id_col].isin(unmatched_card_ids)]
+    fallback_merged = pd.merge(
+        fallback_rows,
+        prices,
+        how="left",
+        left_on=[cfg.data_card_id_col],
+        right_on=[cfg.prices_card_id_col],
+        suffixes=("", "_price")
+    )
+
+    # Mark fallback rows
+    fallback_merged["fallback_merge"] = True
+    merged_strict["fallback_merge"] = False
+
+    # Drop rows from strict that were also fallback targets
+    merged_strict = merged_strict[~merged_strict[cfg.data_card_id_col].isin(unmatched_card_ids)]
+
+    # Combine both
+    merged_all = pd.concat([merged_strict, fallback_merged], ignore_index=True)
+
+    return merged_all
 
 
 def drop_rows_missing_prices(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
