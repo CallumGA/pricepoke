@@ -9,6 +9,8 @@ from network import PricePredictor, get_dataloaders
 import config
 
 # TODO: move out data class to its own file, clean up code and review exactly
+# TODO: run SHAP on the model to see which features affect the predictions/model the most...
+
 
 
 @dataclass
@@ -16,7 +18,8 @@ class TrainingConfig:
     batch_size: int = 64
     learning_rate: float = 0.001
     num_epochs: int = 200
-    patience: int = 10  # For early stopping
+    # number of epochs with no improvement before early stopping
+    patience: int = 30
     model_save_path: str = config.MODEL_SAVE_PATH
     input_csv_path: str = config.INPUT_CSV_PATH
     target_col: str = config.TARGET_COL

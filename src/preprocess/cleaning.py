@@ -256,6 +256,26 @@ def drop_rows_missing_prices(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame
     return out.dropna(subset=present, how="all")
 
 
+def remove_fixed_price_rows(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
+    """
+    Removes rows where rawPrice, gradedPriceTen, and gradedPriceNine are all 20.0,
+    which might indicate placeholder or invalid data.
+    """
+    price_cols = ["rawPrice", "gradedPriceTen", "gradedPriceNine"]
+    out = df.copy()
+    # Check if all required columns exist before applying the filter
+    if not all(col in out.columns for col in price_cols):
+        return out
+
+    # Create a boolean mask for rows where all specified columns are 20.0
+    mask = (out["rawPrice"] == 20.0) & \
+           (out["gradedPriceTen"] == 20.0) & \
+           (out["gradedPriceNine"] == 20.0)
+
+    # Invert the mask to keep rows that do NOT meet the condition
+    return out[~mask]
+
+
 def add_missing_flags_and_impute_prices(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
     out = df.copy()
     cols = [c for c in (cfg.price_columns or []) if c in out.columns]
@@ -325,6 +345,7 @@ def clean_data(df: pd.DataFrame, cfg: CleanConfig) -> pd.DataFrame:
         ensure_date_consistency,
         impute_release_dates,
         add_age_features,
+        remove_fixed_price_rows,
         drop_rows_missing_prices,
         add_missing_flags_and_impute_prices,
         detect_and_remove_outliers,
