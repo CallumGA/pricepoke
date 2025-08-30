@@ -38,15 +38,18 @@ def get_dataloaders(batch_size=64):
     features = features.to_numpy(dtype="float32")
     targets = targets.to_numpy(dtype="float32")
 
-    # normalize for a mean of 0 and std of 1 and save pk1 for later predictions
-    scaler = StandardScaler()
-    features = scaler.fit_transform(features)
-    joblib.dump(scaler, config.SCALER_PATH)
-
     # now we must do a train/test split for features (x) and for targets (y)
+    # This must be done BEFORE scaling to prevent data leakage from the validation set.
     feature_train, feature_val, target_train, target_val = train_test_split(
         features, targets, test_size=0.2, random_state=42
     )
+
+    # Fit the scaler ONLY on the training data to learn its distribution.
+    scaler = StandardScaler()
+    feature_train = scaler.fit_transform(feature_train)
+    # Apply the SAME transformation to the validation data.
+    feature_val = scaler.transform(feature_val)
+    joblib.dump(scaler, config.SCALER_PATH)
 
     # convert the split numpy arrays to PyTorch tensors and create datasets
     train_dataset = TensorDataset(torch.tensor(feature_train), torch.tensor(target_train))

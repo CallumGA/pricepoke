@@ -142,27 +142,18 @@ def train_model(
 
 def get_class_weights(train_loader: torch.utils.data.DataLoader) -> torch.Tensor:
     """
-    Calculates class weights for handling imbalanced datasets.
-    This is more efficient than re-reading the CSV file.
+    Calculates class weights for handling imbalanced datasets from the training data.
+    This prevents data leakage from the validation set.
     """
-    # Accessing the underlying dataset's targets is much more efficient
-    # than reloading the entire CSV. This assumes the custom Dataset
-    # stores targets in a way that can be accessed.
-    try:
-        targets = train_loader.dataset.targets
-        if isinstance(targets, torch.Tensor):
-            targets = targets.numpy()
+    # For a TensorDataset, the tensors are stored in a tuple `dataset.tensors`.
+    # The targets are the second element (index 1).
+    targets = train_loader.dataset.tensors[1]
+    if isinstance(targets, torch.Tensor):
+        targets = targets.numpy()
 
-        class_counts = pd.Series(targets.flatten()).value_counts()
-        count_false = class_counts.get(0, 0)
-        count_true = class_counts.get(1, 0)
-    except AttributeError:
-        # Fallback to reading the CSV if the dataset doesn't expose targets
-        print("Warning: Could not access targets from DataLoader. Falling back to reading CSV.")
-        full_data = pd.read_csv(config.INPUT_CSV_PATH)
-        class_counts = full_data[config.TARGET_COL].value_counts()
-        count_false = class_counts.get(0, 0)
-        count_true = class_counts.get(1, 0)
+    class_counts = pd.Series(targets.flatten()).value_counts()
+    count_false = class_counts.get(0, 0)
+    count_true = class_counts.get(1, 0)
 
     pos_weight = 1.0
     if count_true > 0 and count_false > 0:
@@ -171,11 +162,12 @@ def get_class_weights(train_loader: torch.utils.data.DataLoader) -> torch.Tensor
         # technique to dampen the weight while still penalizing errors on the minority class.
         pos_weight = np.sqrt(raw_ratio)
         print(
-            f"Class Imbalance Detected: {count_false} 'False' vs {count_true} 'True' (Ratio: {raw_ratio:.2f})."
+            f"Class Imbalance Detected in Training Set: {count_false} 'False' vs {count_true} 'True' "
+            f"(Ratio: {raw_ratio:.2f})."
         )
         print(f"Applying a dampened positive class weight of {pos_weight:.2f} to compensate.")
     else:
-        print("No class imbalance detected or one class is missing. Using default weight.")
+        print("No class imbalance detected or one class is missing in the training set. Using default weight.")
 
     return torch.tensor([pos_weight])
 
