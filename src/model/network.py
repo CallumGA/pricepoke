@@ -66,15 +66,18 @@ def get_dataloaders(batch_size=64):
     Neural Network Classifier Architecture
 """
 class PricePredictor(nn.Module):
-    def __init__(self, input_size):
+
+    def __init__(self, input_size: int):
         super(PricePredictor, self).__init__()
         self.model = nn.Sequential(
-            nn.Linear(input_size, 256),    # <-- input layer
+            nn.Linear(input_size, 256),
             nn.ReLU(),
-            nn.Linear(256, 128), # <-- hidden layer
+            nn.Dropout(0.4),
+            nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(128, 1)    # <-- output layer
+            nn.Dropout(0.4),
+            nn.Linear(128, 1),
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
