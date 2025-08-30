@@ -3,16 +3,32 @@ import joblib
 import pandas as pd
 import numpy as np
 import argparse
-from network import PricePredictor
+import os
+import json
+from safetensors.torch import load_file
+from typing import List, Tuple
+
+from network import PricePredictor # Ensure the model class is importable
 import config
 
-# TODO: clean this up significantly
 
+def load_model_and_config(model_dir: str) -> Tuple[torch.nn.Module, List[str]]:
+    """Loads a trained model and its configuration from a directory."""
+    # 1. Load configuration, including the crucial feature list
+    config_path = os.path.join(model_dir, "config.json")
+    with open(config_path, "r") as f:
+        model_config = json.load(f)
+    
+    # 2. Instantiate the model and load the trained weights
+    model = PricePredictor(input_size=model_config["input_size"])
+    weights_path = os.path.join(model_dir, "model.safetensors")
+    model.load_state_dict(load_file(weights_path))
+    model.eval() # Set the model to evaluation mode
 
-def predict(model, scaler, input_features):
+    return model, model_config["feature_columns"]
 
-    model.eval()
-
+def predict(model: torch.nn.Module, scaler, input_features: pd.Series) -> Tuple[bool, float]:
+    """Performs a prediction on a single sample of card features."""
     # Convert features to numpy array, reshape for a single sample, and scale
     features_np = input_features.to_numpy(dtype="float32").reshape(1, -1)
     features_scaled = scaler.transform(features_np)
@@ -65,18 +81,9 @@ if __name__ == "__main__":
     # Take the first row if multiple entries exist for the same ID
     card_sample = card_data_row.iloc[0]
 
-    # --- Define Feature Columns (MUST MATCH TRAINING SCRIPT) ---
-    # We explicitly define which columns are identifiers and which is the target,
-    # so we can isolate the feature columns the model expects.
-    feature_columns = [c for c in full_data.columns if c not in config.IDENTIFIER_COLS and c != config.TARGET_COL]
-
-    # Load the scaler
+    # --- Load Scaler and Model ---
     scaler = joblib.load(config.SCALER_PATH)
-
-    # Load the model
-    input_size = len(feature_columns)
-    model = PricePredictor(input_size=input_size)
-    model.load_state_dict(torch.load(config.MODEL_SAVE_PATH))
+    model, feature_columns = load_model_and_config(config.MODEL_SAVE_DIR)
 
     # --- Make a Prediction on a Sample ---
     # Get a sample card's features and its true label

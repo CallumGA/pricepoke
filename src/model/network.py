@@ -59,7 +59,7 @@ def get_dataloaders(batch_size=64):
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False)
 
-    return train_loader, val_loader, feature_train.shape[1]
+    return train_loader, val_loader, feature_cols
 
 
 """

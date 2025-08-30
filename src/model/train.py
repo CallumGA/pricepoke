@@ -3,8 +3,11 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import pandas as pd
+import os
+import json
+from safetensors.torch import save_file
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, List
 from network import PricePredictor, get_dataloaders
 import config
 
@@ -19,8 +22,8 @@ class TrainingConfig:
     learning_rate: float = 0.001
     num_epochs: int = 200
     # number of epochs with no improvement before early stopping
-    patience: int = 30
-    model_save_path: str = config.MODEL_SAVE_PATH
+    patience: int = 40
+    model_save_dir: str = config.MODEL_SAVE_DIR
     input_csv_path: str = config.INPUT_CSV_PATH
     target_col: str = config.TARGET_COL
 
@@ -93,11 +96,13 @@ def train_model(
     train_loader: torch.utils.data.DataLoader,
     val_loader: torch.utils.data.DataLoader,
     cfg: TrainingConfig,
+    feature_columns: List[str],
 ):
     """
     Main training loop with early stopping.
     """
     best_val_loss = float("inf")
+    input_size = len(feature_columns)
     best_val_acc = 0.0
     epochs_no_improve = 0
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -122,8 +127,24 @@ def train_model(
             best_val_loss = val_loss
             best_val_acc = val_acc
             epochs_no_improve = 0
-            torch.save(model.state_dict(), cfg.model_save_path)
-            print(f"Validation loss decreased. Saving model with Val Acc: {val_acc:.4f}")
+            # --- Save model in Hugging Face-friendly format ---
+            print(f"Validation loss decreased. Saving model to {cfg.model_save_dir}")
+            os.makedirs(cfg.model_save_dir, exist_ok=True)
+
+            # 1. Save model configuration to config.json
+            config_path = os.path.join(cfg.model_save_dir, "config.json")
+            model_config = {
+                "input_size": input_size,
+                "model_class": model.__class__.__name__,
+                "feature_columns": feature_columns,  # Save the exact feature list
+            }
+            with open(config_path, "w") as f:
+                json.dump(model_config, f, indent=2)
+
+            # 2. Save model weights using safetensors for safety and speed
+            weights_path = os.path.join(cfg.model_save_dir, "model.safetensors")
+            save_file(model.state_dict(), weights_path)
+            print(f"Model config and weights successfully saved to {cfg.model_save_dir}")
         else:
             epochs_no_improve += 1
 
@@ -137,7 +158,7 @@ def train_model(
     print(
         f"Best Model Performance -> Validation Loss: {best_val_loss:.4f} | Validation Accuracy: {best_val_acc:.4f}"
     )
-    print(f"Model saved to {cfg.model_save_path}")
+    print(f"Best model saved in {cfg.model_save_dir}")
 
 
 def get_class_weights(train_loader: torch.utils.data.DataLoader) -> torch.Tensor:
@@ -178,7 +199,9 @@ if __name__ == "__main__":
     cfg = TrainingConfig()
 
     # --- Data, Model, Loss, Optimizer ---
-    train_loader, val_loader, input_size = get_dataloaders(batch_size=cfg.batch_size)
+    # get_dataloaders should return the feature list to ensure consistency
+    train_loader, val_loader, feature_columns = get_dataloaders(batch_size=cfg.batch_size)
+    input_size = len(feature_columns)
     model = PricePredictor(input_size=input_size)
 
     # --- Handle Class Imbalance with Weighted Loss ---
@@ -192,4 +215,4 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=cfg.learning_rate)
 
     # --- Begin Training ---
-    train_model(model, criterion, optimizer, train_loader, val_loader, cfg)
+    train_model(model, criterion, optimizer, train_loader, val_loader, cfg, feature_columns)

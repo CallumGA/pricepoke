@@ -13,7 +13,8 @@ ENCODER_DIR.mkdir(parents=True, exist_ok=True)
 
 # File Paths
 INPUT_CSV_PATH = DATA_DIR / "pokemon_final_with_labels.csv"
-MODEL_SAVE_PATH = MODEL_DIR / "price_predictor.pth"
+# Use a directory for saving the model components (config.json, model.safetensors)
+MODEL_SAVE_DIR = MODEL_DIR / "price_predictor_model"
 SCALER_PATH = ENCODER_DIR / "scaler.pkl"
 
 
