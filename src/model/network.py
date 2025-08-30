@@ -9,13 +9,9 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import TensorDataset, DataLoader
 import config
 
-
 """
     Prepare the data for training
 """
-
-# TODO: CLEANUP AND COMMENT EXPLANATIONS!
-
 
 def get_dataloaders(batch_size=64):
 
@@ -39,15 +35,14 @@ def get_dataloaders(batch_size=64):
     targets = targets.to_numpy(dtype="float32")
 
     # now we must do a train/test split for features (x) and for targets (y)
-    # This must be done BEFORE scaling to prevent data leakage from the validation set.
     feature_train, feature_val, target_train, target_val = train_test_split(
         features, targets, test_size=0.2, random_state=42
     )
 
-    # Fit the scaler ONLY on the training data to learn its distribution.
+    # fit the scaler on the training data to learn its distribution
     scaler = StandardScaler()
     feature_train = scaler.fit_transform(feature_train)
-    # Apply the SAME transformation to the validation data.
+    # fit the scalar on the validation data to learn its distribution
     feature_val = scaler.transform(feature_val)
     joblib.dump(scaler, config.SCALER_PATH)
 
@@ -55,7 +50,7 @@ def get_dataloaders(batch_size=64):
     train_dataset = TensorDataset(torch.tensor(feature_train), torch.tensor(target_train))
     val_dataset = TensorDataset(torch.tensor(feature_val), torch.tensor(target_val))
 
-    # create dataloaders
+    # create dataloaders for loading into training loop
     train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False)
 
@@ -65,6 +60,7 @@ def get_dataloaders(batch_size=64):
 """
     Neural Network Classifier Architecture
 """
+
 class PricePredictor(nn.Module):
 
     def __init__(self, input_size: int):

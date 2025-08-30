@@ -5,8 +5,6 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 import joblib
 import json
 
-# TODO: CLEANUP AND COMMENT EXPLANATIONS!
-
 CATEGORICAL_COLS_DEFAULT = [
     "rarity",
     "energyType",
@@ -151,7 +149,6 @@ def save_artifacts(encoder: OneHotEncoder | None, scaler: StandardScaler, out_di
 
 
 def main():
-    # Configuration is now hardcoded to simplify the pipeline, removing the need for command-line arguments.
     class Config:
         in_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/cleaned_sales.csv"
         out_path = "/Users/callumanderson/Library/Mobile Documents/com~apple~CloudDocs/Documents/Documents - Callum’s Laptop/Masters-File-Repo/pytorch-learning/pricepoke/data/processed/pokemon_final.csv"
@@ -162,35 +159,26 @@ def main():
 
     df = pd.read_csv(args.in_path, low_memory=False)
 
-    # --- Create Historical Features (MUST be done before deduplication) ---
-    # We use the full time-series data to calculate trend-based features.
-    # This gives the model a "memory" of the card's recent price momentum.
     if "rawPrice" in df.columns and "idTCGP" in df.columns and "date" in df.columns:
         print("Creating historical trend features...")
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        # We must sort by date to ensure the rolling window is correct
         df.sort_values(by=["idTCGP", "date"], inplace=True)
 
-        # Calculate a 7-day rolling average price for each card.
         df['rolling_avg_price_7d'] = df.groupby('idTCGP')['rawPrice'].transform(
             lambda x: x.rolling(window=7, min_periods=2).mean()
         )
 
-        # Calculate the ratio of the current price to the rolling average.
         df['price_vs_rolling_avg'] = df['rawPrice'] / df['rolling_avg_price_7d']
 
-        # Replace infinite values (from division by zero) and fill NaNs.
         df.replace([np.inf, -np.inf], np.nan, inplace=True)
         df['price_vs_rolling_avg'].fillna(1.0, inplace=True)
 
-        # We can now drop the intermediate rolling average column.
         df.drop(columns=['rolling_avg_price_7d'], inplace=True)
         print("Historical trend features created.\n")
 
-    # --- Deduplicate Data to Keep Only the Most Recent Entry Per Card ---
     if "date" in df.columns and "idTCGP" in df.columns:
         print("Deduplicating data to keep only the most recent entry per card...")
-        df.dropna(subset=["date"], inplace=True) # Drop rows where date could not be parsed
+        df.dropna(subset=["date"], inplace=True)
         df.sort_values(by=["idTCGP", "date"], inplace=True)
 
         initial_rows = len(df)
@@ -228,22 +216,15 @@ def main():
 
     os.makedirs(os.path.dirname(args.out_path), exist_ok=True)
 
-    # Also emit a sidecar file that includes the identifier, features, and the primary label `y`
     if 'y' in df.columns and 'idTCGP' in df.columns:
         out_with_labels = args.out_path[:-4] + "_with_labels.csv" if args.out_path.lower().endswith(".csv") else args.out_path + "_with_labels.csv"
-        
-        # Prepare identifier columns, renaming for consistency with other scripts
-        # We include 'name' here so the prediction script can display it.
+
         id_cols = df[['idTCGP', 'name']].rename(columns={'idTCGP': 'tcgplayer_id'})
 
-        # Prepare the target column
-        # This is a more robust way to clean the target column.
-        # It warns if any values are being silently changed, which is crucial for data integrity.
         y_series = pd.to_numeric(df['y'], errors='coerce')
 
         y_clean = y_series.fillna(0).astype('int64')
 
-        # Combine identifier, features, and target into the final dataframe
         X_with_id_and_y = pd.concat([
             id_cols.reset_index(drop=True),
             X.reset_index(drop=True),

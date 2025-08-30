@@ -11,17 +11,12 @@ from typing import Tuple, List
 from network import PricePredictor, get_dataloaders
 import config
 
-# TODO: CLEANUP AND COMMENT EXPLANATIONS!
-# TODO: run SHAP on the model to see which features affect the predictions/model the most...
-
-
 
 @dataclass
 class TrainingConfig:
     batch_size: int = 64
     learning_rate: float = 0.001
     num_epochs: int = 200
-    # number of epochs with no improvement before early stopping
     patience: int = 40
     model_save_dir: str = config.MODEL_SAVE_DIR
     input_csv_path: str = config.INPUT_CSV_PATH
@@ -35,7 +30,6 @@ def _train_epoch(
     optimizer: optim.Optimizer,
     device: torch.device,
 ) -> Tuple[float, float]:
-    """Trains the model for one epoch."""
     model.train()
     running_loss = 0.0
     correct_predictions = 0
@@ -67,7 +61,6 @@ def _validate_epoch(
     criterion: nn.Module,
     device: torch.device,
 ) -> Tuple[float, float]:
-    """Validates the model for one epoch."""
     model.eval()
     running_loss = 0.0
     correct_predictions = 0
@@ -98,9 +91,6 @@ def train_model(
     cfg: TrainingConfig,
     feature_columns: List[str],
 ):
-    """
-    Main training loop with early stopping.
-    """
     best_val_loss = float("inf")
     input_size = len(feature_columns)
     best_val_acc = 0.0
@@ -122,26 +112,22 @@ def train_model(
             f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}"
         )
 
-        # Early stopping check: save the model only if validation loss improves.
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_val_acc = val_acc
             epochs_no_improve = 0
-            # --- Save model in Hugging Face-friendly format ---
             print(f"Validation loss decreased. Saving model to {cfg.model_save_dir}")
             os.makedirs(cfg.model_save_dir, exist_ok=True)
 
-            # 1. Save model configuration to config.json
             config_path = os.path.join(cfg.model_save_dir, "config.json")
             model_config = {
                 "input_size": input_size,
                 "model_class": model.__class__.__name__,
-                "feature_columns": feature_columns,  # Save the exact feature list
+                "feature_columns": feature_columns,
             }
             with open(config_path, "w") as f:
                 json.dump(model_config, f, indent=2)
 
-            # 2. Save model weights using safetensors for safety and speed
             weights_path = os.path.join(cfg.model_save_dir, "model.safetensors")
             save_file(model.state_dict(), weights_path)
             print(f"Model config and weights successfully saved to {cfg.model_save_dir}")
@@ -162,12 +148,6 @@ def train_model(
 
 
 def get_class_weights(train_loader: torch.utils.data.DataLoader) -> torch.Tensor:
-    """
-    Calculates class weights for handling imbalanced datasets from the training data.
-    This prevents data leakage from the validation set.
-    """
-    # For a TensorDataset, the tensors are stored in a tuple `dataset.tensors`.
-    # The targets are the second element (index 1).
     targets = train_loader.dataset.tensors[1]
     if isinstance(targets, torch.Tensor):
         targets = targets.numpy()
@@ -179,8 +159,6 @@ def get_class_weights(train_loader: torch.utils.data.DataLoader) -> torch.Tensor
     pos_weight = 1.0
     if count_true > 0 and count_false > 0:
         raw_ratio = count_false / count_true
-        # The raw ratio can be too aggressive. Taking the square root is a common
-        # technique to dampen the weight while still penalizing errors on the minority class.
         pos_weight = np.sqrt(raw_ratio)
         print(
             f"Class Imbalance Detected in Training Set: {count_false} 'False' vs {count_true} 'True' "
@@ -194,25 +172,18 @@ def get_class_weights(train_loader: torch.utils.data.DataLoader) -> torch.Tensor
 
 
 if __name__ == "__main__":
-    # --- Configuration ---
-    # Using a dataclass for configuration makes the script cleaner and easier to modify.
+
     cfg = TrainingConfig()
 
-    # --- Data, Model, Loss, Optimizer ---
-    # get_dataloaders should return the feature list to ensure consistency
     train_loader, val_loader, feature_columns = get_dataloaders(batch_size=cfg.batch_size)
     input_size = len(feature_columns)
     model = PricePredictor(input_size=input_size)
 
-    # --- Handle Class Imbalance with Weighted Loss ---
     pos_weight_tensor = get_class_weights(train_loader)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pos_weight_tensor = pos_weight_tensor.to(device)
 
-    # Pass the calculated weight to the loss function to penalize errors on the
-    # minority class more heavily.
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
     optimizer = optim.Adam(model.parameters(), lr=cfg.learning_rate)
 
-    # --- Begin Training ---
     train_model(model, criterion, optimizer, train_loader, val_loader, cfg, feature_columns)
